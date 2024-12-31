@@ -3,107 +3,87 @@
 #include <ModbusRTU.h>
 #include <WiFi.h>
 #include <ModbusIP_ESP8266.h>
+#include <SimpleSyslog.h>
 
 #define MASTER_SLAVE_ID 2         // Smart meter ID for Modbus RTU
 #define START_REG 20482           // Starting register to read from the smart meter
 #define REG_COUNT 48              // Number of registers to read from the smart meter
-#define TARGET_REGISTER_INDEX 16  // Index of register 20498 in the read data
 #define REFRESH_INTERVAL 500      // refresh interval in ms of smartmeter
+#define BATT_REFRESH_INTERVAL 60000 // maximum interval of information from battery update
 
 #define OVUM_SLAVE_ID 18           // Slave ID of mbOvum device
 #define OVUM_REGISTER 50          // Register to write in mbOvum device
 
-#define LOG_LEVEL 0
+// Syslog server configuration
+SimpleSyslog syslog(SYSLOG_NAME, HOSTNAME, SYSLOG_SERVER_IP);
+#define SYSLOG_FACILITY FAC_USER
+#define LOG_INFO(fmt, ...)    syslog.printf(SYSLOG_FACILITY, PRI_INFO, fmt, ##__VA_ARGS__)
+#define LOG_ERROR(fmt, ...)   syslog.printf(SYSLOG_FACILITY, PRI_ERROR, fmt, ##__VA_ARGS__)
+#define LOG_DEBUG(fmt, ...)   syslog.printf(SYSLOG_FACILITY, PRI_DEBUG, fmt, ##__VA_ARGS__)
 
-ModbusRTU mbMaster;               // Modbus RTU master instance on Serial2 (smart meter)
+ModbusRTU mbMeter;               // Modbus RTU master instance on Serial2 (smart meter)
 ModbusRTU mbOvum;           // Modbus RTU master instance on Serial1 (mbOvum)
 ModbusIP mbTCP;                   // Modbus TCP server instance
 
-uint16_t slaveRegisters[REG_COUNT]; // Buffer to store values read from the smart meter
-unsigned long lastReadTime = 0;     // Variable to store the last RTU read time
+float battPower;
+float householdPower;
+unsigned long battUpdateTime;
+unsigned long lastReadTime = 0;
+uint16_t meterRegisters[REG_COUNT]; // Buffer to store values read from the smart meter
 
-struct RegisterRange {
-  uint16_t start;   // Starting register number
-  uint16_t length;  // Length of the range
-};
-const RegisterRange predefinedRanges[] = {
-    {256, 38},
-    {512, 26},
-    {768, 10},
-    {1024, 24},
-    {1283, 10},
-    {4096, 10},
-    {4352, 10},
-    {4864, 20},
-    {4899, 10},
-    {5125, 10}
-};
-const int rangeCount = sizeof(predefinedRanges) / sizeof(predefinedRanges[0]); // Get the size of the array
 
-bool masterCallback(Modbus::ResultCode event, uint16_t transactionId, void* data) {
+bool meterCallback(Modbus::ResultCode event, uint16_t transactionId, void* data) {
   if (event != Modbus::EX_SUCCESS) {
-    Serial.print("Master request error: 0x");
-    Serial.println(event, HEX);
+    LOG_ERROR("Master request error: 0x%02X", event );
   }
   return true;
 }
 
 bool ovumCallback(Modbus::ResultCode event, uint16_t transactionId, void* data) {
   if (event != Modbus::EX_SUCCESS) {
-    Serial.print("Ovum Master write error: 0x");
-    Serial.println(event, HEX);
+    LOG_ERROR("Ovum Master write error: 0x%02X", event);
+  } 
+  return true;
+}
+
+
+uint16_t cbOnGet50(TRegister* reg, uint16_t val) {
+  // register 51, if not 0, overrides 
+  if (mbTCP.Hreg(51) != 0) {
+    return mbTCP.Hreg(51);
   } else {
-    Serial.println("Ovum Master write completed successfully.");
+    float totalPower = householdPower + battPower;
+    int16_t totalPowerOvum = (int16_t)(totalPower / 10);
+    LOG_DEBUG("total power calculation. householdPower=%d, battPower=%d, totalPower=%d, battPowerOvm=%d",
+                householdPower, battPower, totalPower, totalPowerOvum);
+    return totalPowerOvum;
   }
-  return true;
 }
 
-// Callback function to log Modbus TCP requests
-bool tcpCallback(TRegister* reg, uint16_t val) {
-  Serial.print(" cbReg: ");
-  Serial.print(reg->address.address);
-  Serial.print(", cbValue: ");
-  Serial.print(val);
-  Serial.print(" loopRegVal: ");
-  return true;
+uint16_t cbOnSetBattery(TRegister* reg, uint16_t val) {
+  battPower = (mbTCP.Hreg(769) - mbTCP.Hreg(770)) * mbTCP.Hreg(768) / 100 /1000; // calculate battery charge(+) or discharge (-) power in kw
+  LOG_DEBUG("cbOnSetBattery callback address: %d, battPower=%d", reg->address.address, battPower); 
+  battUpdateTime = millis();
+  return val;
 }
 
-// Callback function for Modbus TCP connection
-bool cbConn(IPAddress ip) {
-  Serial.print("Connected to IP: ");
-  Serial.println(ip);
-  return true;
+float combineRegistersToFloat(uint16_t reg1, uint16_t reg2) {
+  // Combine the two registers into a single 32-bit variable
+  uint32_t combinedValue = (reg1 << 16) | reg2;
+
+  // Convert the 32-bit value to a float
+  float floatValue = *(float*)&combinedValue;
+
+  return floatValue;
 }
-
-int16_t processRegisters(uint16_t* slaveRegisters, int index) {
-    // Get the two words from the specified index
-    uint16_t word1 = slaveRegisters[index];
-    uint16_t word2 = slaveRegisters[index + 1];
-
-    // Combine words (assuming big-endian format)
-    uint32_t combinedValue = ((uint32_t)word1 << 16) | word2;
-
-    // Convert to float
-    float floatValue;
-    memcpy(&floatValue, &combinedValue, sizeof(float));
-
-    // Multiply by -100.0f
-    //floatValue *= 1000.0f;
-
-    // Convert to int16_t
-    //int16_t intValue = (int16_t)(floatValue);
-
-    return floatValue;
-}
-
 
 void setup() {
   Serial.begin(115200);
 
   // Initialize Modbus RTU Master Serial (Smart Meter)
   Serial2.begin(9600, SERIAL_8E1, 17, 16); // GPIO17 for RX, GPIO16 for TX
-  mbMaster.begin(&Serial2);
-  mbMaster.master();
+  mbMeter.begin(&Serial2);
+  mbMeter.master();
 
   // Initialize Modbus RTU Master Serial1 (mbOvum)
   Serial1.begin(19200, SERIAL_8N1, 19, 18); // GPIO19 for RX, GPIO18 for TX
@@ -126,103 +106,71 @@ void setup() {
   Serial.println(WiFi.localIP());
 
   // Set up Modbus TCP server
-  mbTCP.onConnect(cbConn);
   mbTCP.server();
 
-  for (int i = 0; i < REG_COUNT; i++) {
-    mbTCP.addHreg(START_REG + i, 123);  // Initialize holding registers for TCP
-  }
+  mbOvum.addHreg(OVUM_REGISTER, 20);
+  mbOvum.onGetHreg(OVUM_REGISTER, cbOnGet50);
 
-  mbTCP.addHreg(50, 20);
-  mbTCP.addHreg(51, 0);   // synthetic register to influence hreg 50
-  mbTCP.addHreg(52, 0);
-  mbTCP.addHreg(768, 11); 
-  mbTCP.addHreg(769, 11); 
-  mbTCP.addHreg(770, 11); 
-  mbTCP.addHreg(771, 11); 
-  
-  // Iterate through each range and print all individual registers
-  for (int i = 0; i < rangeCount; ++i) {
-    uint16_t start = predefinedRanges[i].start;
-    uint16_t length = predefinedRanges[i].length;
-    for (uint16_t reg = start; reg < start + length; ++reg) {
-      mbTCP.addHreg(reg, 0); // add each register 
-    }
+  mbTCP.addHreg(OVUM_REGISTER, 20);
+  mbTCP.addHreg(OVUM_REGISTER + 1, 0);   // register to override 50
+    
+  mbTCP.addHreg(768, 0); // battery voltage 
+  mbTCP.addHreg(769, 0); // battery charge current
+  mbTCP.addHreg(770, 0); // battery discharge current
+  mbTCP.addHreg(771, 0); // battery SOC
+  mbTCP.onSetHreg(768, cbOnSetBattery, 3); // callback
+
+  for (int i = START_REG; i < START_REG + REG_COUNT; ++i) {
+    mbTCP.addHreg(i, 0);
   }
-  
-  
-  // Register the TCP callback to log requests
-  
-  //mbTCP.onGetHreg(START_REG, tcpCallback, REG_COUNT);
-  //mbTCP.onGetHreg(50, tcpCallback, 1);
-  
-  mbOvum.addHreg(OVUM_REGISTER, 100);
 }
 
 void loop() {
   // Get the current time
   unsigned long currentTime = millis();
 
-  // Perform Modbus RTU read from smart meter every 1 second
+  // Perform Modbus RTU read from smart meter every REFRESH_INTERVAL
   if (currentTime - lastReadTime >= REFRESH_INTERVAL) {
     lastReadTime = currentTime;  // Update last read time
 
     // Poll data from the smart meter as a Modbus RTU master
-    if (!mbMaster.slave()) {  // If no Modbus RTU transaction is in progress
-      mbMaster.readHreg(MASTER_SLAVE_ID, START_REG, slaveRegisters, REG_COUNT, masterCallback);
+    if (!mbMeter.slave()) {  // If no Modbus RTU transaction is in progress
+      mbMeter.readHreg(MASTER_SLAVE_ID, START_REG, meterRegisters, REG_COUNT, meterCallback);
     }
   }
 
-  // Process Modbus RTU master task (smart meter)
-  mbMaster.task();
+  // check if battery information timeout occured
+  if (currentTime - battUpdateTime >= BATT_REFRESH_INTERVAL) {
+    mbTCP.Hreg(768, 0);
+    mbTCP.Hreg(769, 0);
+    mbTCP.Hreg(770, 0);
+    LOG_ERROR("Battery information receiving timeout");
+  }
+  
+  // Process Modbus RTU smart meter task
+  mbMeter.task();
 
   // Check if we have new data from smart meter
   static bool dataProcessed = false; // To prevent re-processing data
-  if (!mbMaster.slave() && !dataProcessed) { // If transaction is complete and data not yet processed
+  if (!mbMeter.slave() && !dataProcessed) { // If transaction is complete and data not yet processed
     dataProcessed = true;
 
     for (uint16_t i = 0; i < REG_COUNT; i++) {
-      // Perform some calculation for each register (e.g., increase value by i * 2)
-      uint16_t newValue = mbTCP.Hreg(START_REG + i) + i * 2;
-      mbTCP.Hreg(START_REG + i, slaveRegisters[i]);
+      mbTCP.Hreg(START_REG + i, meterRegisters[i]);
     }
   }
 
   // Process registers 20498 and 20499
-  uint16_t word1 = slaveRegisters[TARGET_REGISTER_INDEX];     // Index 16 corresponds to register 20498
-  uint16_t word2 = slaveRegisters[TARGET_REGISTER_INDEX + 1]; // Index 17 corresponds to register 20499
+  householdPower = combineRegistersToFloat(mbTCP.Hreg(20498), mbTCP.Hreg(20499));
+  int16_t totalPowerOvum = (int16_t)(householdPower * -100.0f);
 
-  // Combine words (assuming big-endian format)
-  uint32_t combinedValue = ((uint32_t)word1 << 16) | word2;
-
-  // Convert to float
-  float floatValue;
-  memcpy(&floatValue, &combinedValue, sizeof(float));
-
-
-  Serial.print("floatVal: ");
-  Serial.print(floatValue);
-
-  // Multiply by 100
-  floatValue *= -100.0f;
-
-  // Convert to int16_t
-  int16_t intValue = (int16_t)(floatValue);
-
+  Serial.printf("battery totalPower: %d, powerOvum=%d", householdPower, totalPowerOvum);
+  
   // Write to mbOvum slave register 50
-  // mbOvum.Hreg(OVUM_REGISTER, (uint16_t)intValue);
-  mbTCP.Hreg(OVUM_REGISTER, (int16_t)intValue + mbTCP.Hreg(51));
-  mbTCP.Hreg(OVUM_REGISTER + 2, (int16_t)intValue);
-
-  Serial.print("  hreg50: ");
-  Serial.print(intValue);
-  Serial.print("  batValue: ");
-  Serial.print(mbTCP.Hreg(768));
-  Serial.print(" finalVal: ");
-  Serial.println(intValue + mbTCP.Hreg(51));
+  mbTCP.Hreg(OVUM_REGISTER, totalPowerOvum);
 
   // Reset dataProcessed flag when new transaction starts
-  if (mbMaster.slave()) {
+  if (mbMeter.slave()) {
     dataProcessed = false;
   }
 
