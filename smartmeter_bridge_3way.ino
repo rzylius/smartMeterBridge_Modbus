@@ -8,7 +8,7 @@
 #define MASTER_SLAVE_ID 2         // Smart meter ID for Modbus RTU
 #define START_REG 20482           // Starting register to read from the smart meter
 #define REG_COUNT 48              // Number of registers to read from the smart meter
-#define REFRESH_INTERVAL 500      // refresh interval in ms of smartmeter
+#define REFRESH_INTERVAL 2000      // refresh interval in ms of smartmeter
 #define BATT_REFRESH_INTERVAL 60000 // maximum interval of information from battery update
 
 #define OVUM_SLAVE_ID 18           // Slave ID of mbOvum device
@@ -34,6 +34,7 @@ uint16_t meterRegisters[REG_COUNT]; // Buffer to store values read from the smar
 bool meterCallback(Modbus::ResultCode event, uint16_t transactionId, void* data) {
   if (event != Modbus::EX_SUCCESS) {
     LOG_ERROR("Master request error: 0x%02X", event );
+    Serial.println("Master request error: 0x%02X", event );
   }
   return true;
 }
@@ -41,6 +42,7 @@ bool meterCallback(Modbus::ResultCode event, uint16_t transactionId, void* data)
 bool ovumCallback(Modbus::ResultCode event, uint16_t transactionId, void* data) {
   if (event != Modbus::EX_SUCCESS) {
     LOG_ERROR("Ovum Master write error: 0x%02X", event);
+    Serial.println("Ovum Master write error: 0x%02X", event);
   } 
   return true;
 }
@@ -52,7 +54,9 @@ uint16_t cbOnGet50(TRegister* reg, uint16_t val) {
   } else {
     float totalPower = householdPower; // no battPower is considered in this formula
     int16_t totalPowerOvum = (int16_t)(totalPower * -100.0f);
-    LOG_DEBUG("total power calculation. householdPower=%.2f, battPower=%.2f, totalPower=%.2f, totalPowerOvum=%d",
+    LOG_DEBUG("OnGet50: total power calculation. householdPower=%.2f, battPower=%.2f, totalPower=%.2f, totalPowerOvum=%d",
+                householdPower, battPower, totalPower, totalPowerOvum);
+    Serial.printf("OnGet50: total power calculation. householdPower=%.2f, battPower=%.2f, totalPower=%.2f, totalPowerOvum=%d\n",
                 householdPower, battPower, totalPower, totalPowerOvum);
     return totalPowerOvum;
   }
@@ -166,7 +170,7 @@ void loop() {
   householdPower = combineRegistersToFloat(mbTCP.Hreg(20498), mbTCP.Hreg(20499));
   int16_t totalPowerOvum = (int16_t)(householdPower * -100.0f);
 
-  Serial.printf("battery totalPower: %.2f, powerOvum=%d", householdPower, totalPowerOvum);
+  Serial.printf("READ battery totalPower: %.2f, powerOvum=%d\n", householdPower, totalPowerOvum);
   
   // Write to mbOvum slave register 50
   mbTCP.Hreg(OVUM_REGISTER, totalPowerOvum);
