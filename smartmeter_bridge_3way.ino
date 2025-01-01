@@ -70,7 +70,8 @@ float combineRegistersToFloat(uint16_t reg1, uint16_t reg2) {
   uint32_t combinedValue = (reg1 << 16) | reg2;
 
   // Convert the 32-bit value to a float
-  float floatValue = *(float*)&combinedValue;
+  float floatValue;
+  memcpy(&floatValue, &combinedValue, sizeof(float));
 
   return floatValue;
 }
