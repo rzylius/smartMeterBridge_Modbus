@@ -52,7 +52,7 @@ uint16_t cbOnGet50(TRegister* reg, uint16_t val) {
   } else {
     float totalPower = householdPower; // no battPower is considered in this formula
     int16_t totalPowerOvum = (int16_t)(totalPower * -100.0f);
-    LOG_DEBUG("total power calculation. householdPower=%d, battPower=%d, totalPower=%d, totalPowerOvum=%d",
+    LOG_DEBUG("total power calculation. householdPower=%.2f, battPower=%.2f, totalPower=%.2f, totalPowerOvum=%d",
                 householdPower, battPower, totalPower, totalPowerOvum);
     return totalPowerOvum;
   }
@@ -60,7 +60,7 @@ uint16_t cbOnGet50(TRegister* reg, uint16_t val) {
 
 uint16_t cbOnSetBattery(TRegister* reg, uint16_t val) {
   battPower = (mbTCP.Hreg(769) - mbTCP.Hreg(770)) * mbTCP.Hreg(768) / 100 /1000; // calculate battery charge(+) or discharge (-) power in kw
-  LOG_DEBUG("cbOnSetBattery callback address: %d, battPower=%d", reg->address.address, battPower); 
+  LOG_DEBUG("cbOnSetBattery callback address: %d, battPower=%.2f", reg->address.address, battPower); 
   battUpdateTime = millis();
   return val;
 }
@@ -166,7 +166,7 @@ void loop() {
   householdPower = combineRegistersToFloat(mbTCP.Hreg(20498), mbTCP.Hreg(20499));
   int16_t totalPowerOvum = (int16_t)(householdPower * -100.0f);
 
-  Serial.printf("battery totalPower: %d, powerOvum=%d", householdPower, totalPowerOvum);
+  Serial.printf("battery totalPower: %.2f, powerOvum=%d", householdPower, totalPowerOvum);
   
   // Write to mbOvum slave register 50
   mbTCP.Hreg(OVUM_REGISTER, totalPowerOvum);
