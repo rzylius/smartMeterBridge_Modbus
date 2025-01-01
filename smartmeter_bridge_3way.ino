@@ -31,7 +31,6 @@ unsigned long battUpdateTime;
 unsigned long lastReadTime = 0;
 uint16_t meterRegisters[REG_COUNT]; // Buffer to store values read from the smart meter
 
-
 bool meterCallback(Modbus::ResultCode event, uint16_t transactionId, void* data) {
   if (event != Modbus::EX_SUCCESS) {
     LOG_ERROR("Master request error: 0x%02X", event );
@@ -45,7 +44,6 @@ bool ovumCallback(Modbus::ResultCode event, uint16_t transactionId, void* data) 
   } 
   return true;
 }
-
 
 uint16_t cbOnGet50(TRegister* reg, uint16_t val) {
   // register 51, if not 0, overrides 
@@ -159,6 +157,9 @@ void loop() {
       mbTCP.Hreg(START_REG + i, meterRegisters[i]);
     }
   }
+  
+  // Process Modbus RTU smart meter task
+  mbMeter.task();
 
   // Process registers 20498 and 20499
   householdPower = combineRegistersToFloat(mbTCP.Hreg(20498), mbTCP.Hreg(20499));
