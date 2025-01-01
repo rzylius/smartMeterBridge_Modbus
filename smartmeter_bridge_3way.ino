@@ -50,9 +50,9 @@ uint16_t cbOnGet50(TRegister* reg, uint16_t val) {
   if (mbTCP.Hreg(51) != 0) {
     return mbTCP.Hreg(51);
   } else {
-    float totalPower = householdPower + battPower;
-    int16_t totalPowerOvum = (int16_t)(totalPower / 10);
-    LOG_DEBUG("total power calculation. householdPower=%d, battPower=%d, totalPower=%d, battPowerOvm=%d",
+    float totalPower = householdPower; // no battPower is considered in this formula
+    int16_t totalPowerOvum = (int16_t)(totalPower * -100.0f);
+    LOG_DEBUG("total power calculation. householdPower=%d, battPower=%d, totalPower=%d, totalPowerOvum=%d",
                 householdPower, battPower, totalPower, totalPowerOvum);
     return totalPowerOvum;
   }
