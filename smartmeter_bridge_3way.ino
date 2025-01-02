@@ -8,7 +8,7 @@
 #define MASTER_SLAVE_ID 2         // Smart meter ID for Modbus RTU
 #define START_REG 20482           // Starting register to read from the smart meter
 #define REG_COUNT 48              // Number of registers to read from the smart meter
-#define REFRESH_INTERVAL 2000      // refresh interval in ms of smartmeter
+#define REFRESH_INTERVAL 500      // refresh interval in ms of smartmeter
 #define BATT_REFRESH_INTERVAL 60000 // maximum interval of information from battery update
 
 #define OVUM_SLAVE_ID 18           // Slave ID of mbOvum device
@@ -48,23 +48,33 @@ bool ovumCallback(Modbus::ResultCode event, uint16_t transactionId, void* data) 
 }
 
 uint16_t cbOnGet50(TRegister* reg, uint16_t val) {
-  // register 51, if not 0, overrides 
+  // OVUM heat pump reads holding register 50, int16 number
+  // reading is in kwh *100, that is 1 kwh is represented as 100
+  // (-) signifies that energy is consumed from the grid
+  // (+) that there is excess of eneregy, and it is supplied to grid
+  // LOGIC:
+  // register 51, if not 0, overrides hreg(50), that is if you want to manually set value write to hreg(51)
+  int16_t return_val;
+  float totalPower;
+  int16_t totalPowerOvum;
+
   if (mbTCP.Hreg(51) != 0) {
-    return mbTCP.Hreg(51);
+    return_val = mbTCP.Hreg(51);
   } else {
-    float totalPower = householdPower; // no battPower is considered in this formula
-    int16_t totalPowerOvum = (int16_t)(totalPower * -100.0f);
-    LOG_DEBUG("OnGet50: householdPower=%.2f, battPower=%.2f, totalPower=%.2f, totalPowerOvum=%d",
-                householdPower, battPower, totalPower, totalPowerOvum);
-    Serial.printf("OnGet50: householdPower=%.2f, battPower=%.2f, totalPower=%.2f, totalPowerOvum=%d\n",
-                householdPower, battPower, totalPower, totalPowerOvum);
-    return totalPowerOvum;
+    totalPower = householdPower; // no battPower is considered in this formula
+    totalPowerOvum = (int16_t)(totalPower * -100.0f);
+    return_val = totalPowerOvum;
   }
+  LOG_DEBUG("OnGet50: hreg(51)=%d, householdPower=%.2f, battPower=%.2f, totalPower=%.2f, totalPowerOvum=%d",
+                mbTCP.Hreg(51), householdPower, battPower, totalPower, totalPowerOvum);
+  Serial.printf("OnGet50: hreg(51)=%d, householdPower=%.2f, battPower=%.2f, totalPower=%.2f, totalPowerOvum=%d\n",
+                mbTCP.Hreg(51), householdPower, battPower, totalPower, totalPowerOvum);
+  return return_val;
 }
 
 uint16_t cbOnSetBattery(TRegister* reg, uint16_t val) {
   battPower = (mbTCP.Hreg(769) - mbTCP.Hreg(770)) * mbTCP.Hreg(768) / 100 /1000; // calculate battery charge(+) or discharge (-) power in kw
-  LOG_DEBUG("cbOnSetBattery callback address: %d, val: %d, battPower=%.2f", reg->address.address, val, battPower); 
+  LOG_DEBUG("cbOnSetBattery callback address: %d, battPower=%.2f", reg->address.address, battPower); 
   battUpdateTime = millis();
   return val;
 }
@@ -121,7 +131,7 @@ void setup() {
   mbTCP.addHreg(769, 0); // battery charge current
   mbTCP.addHreg(770, 0); // battery discharge current
   mbTCP.addHreg(771, 0); // battery SOC
-  mbTCP.onSetHreg(768, cbOnSetBattery, 3); // callback
+  mbTCP.onSetHreg(770, cbOnSetBattery, 1); // callback
 
   for (int i = START_REG; i < START_REG + REG_COUNT; ++i) {
     mbTCP.addHreg(i, 0);
