@@ -1,3 +1,7 @@
+// A bridge, between PRO380-Mod smartmeter (modbusRTU)
+// and OVUM heat pump (modbusRTU)
+// and modbusTCP server, so that with the client one can access data and influence behavior
+
 #include "secrets.h"
 
 #include <ModbusRTU.h>
@@ -21,9 +25,9 @@ SimpleSyslog syslog(SYSLOG_NAME, HOSTNAME, SYSLOG_SERVER_IP);
 #define LOG_ERROR(fmt, ...)   syslog.printf(SYSLOG_FACILITY, PRI_ERROR, fmt, ##__VA_ARGS__)
 #define LOG_DEBUG(fmt, ...)   syslog.printf(SYSLOG_FACILITY, PRI_DEBUG, fmt, ##__VA_ARGS__)
 
-ModbusRTU mbMeter;               // Modbus RTU master instance on Serial2 (smart meter)
+ModbusRTU mbMeter;          // Modbus RTU master instance on Serial2 (smart meter)
 ModbusRTU mbOvum;           // Modbus RTU master instance on Serial1 (mbOvum)
-ModbusIP mbTCP;                   // Modbus TCP server instance
+ModbusIP mbTCP;             // Modbus TCP server instance
 
 float battPower;
 float householdPower;
@@ -69,9 +73,12 @@ uint16_t cbOnGet50(TRegister* reg, uint16_t val) {
                 mbTCP.Hreg(51), householdPower, battPower, totalPower, totalPowerOvum);
   Serial.printf("OnGet50: hreg(51)=%d, householdPower=%.2f, battPower=%.2f, totalPower=%.2f, totalPowerOvum=%d\n",
                 mbTCP.Hreg(51), householdPower, battPower, totalPower, totalPowerOvum);
+  mbTCP.Hreg(50); // updated mbTCP(50) so that you can read it with TCP client
   return return_val;
 }
 
+// battery information from imeon inverter (registers 768 - 771) when read are sent from other controller
+// this is a callback when info is received
 uint16_t cbOnSetBattery(TRegister* reg, uint16_t val) {
   battPower = (mbTCP.Hreg(769) - mbTCP.Hreg(770)) * mbTCP.Hreg(768) / 100 /1000; // calculate battery charge(+) or discharge (-) power in kw
   LOG_DEBUG("cbOnSetBattery callback address: %d, battPower=%.2f", reg->address.address, battPower); 
@@ -118,11 +125,13 @@ void setup() {
   Serial.print("IP Address: ");
   Serial.println(WiFi.localIP());
 
-  // Set up Modbus TCP server
-  mbTCP.server();
-
+  // mbOvum is dedicated to responding to Ovum requests 
   mbOvum.addHreg(OVUM_REGISTER, 20);
-  mbOvum.onGetHreg(OVUM_REGISTER, cbOnGet50);
+  mbOvum.onGetHreg(OVUM_REGISTER, cbOnGet50); // callback reading hreg(50), answer is awlays synthetic generated in callback
+
+  // Set up Modbus TCP server
+  // mbTCP holds all registers retrieved from meter
+  mbTCP.server();
 
   mbTCP.addHreg(OVUM_REGISTER, 20);
   mbTCP.addHreg(OVUM_REGISTER + 1, 0);   // register to override 50
@@ -176,7 +185,7 @@ void loop() {
   // Process Modbus RTU smart meter task
   mbMeter.task();
 
-  // Process registers 20498 and 20499
+  // Process registers 20498 and 20499, which is 
   householdPower = combineRegistersToFloat(mbTCP.Hreg(20498), mbTCP.Hreg(20499));
   int16_t totalPowerOvum = (int16_t)(householdPower * -100.0f);
 
