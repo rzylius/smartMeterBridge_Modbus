@@ -34,7 +34,7 @@ uint16_t meterRegisters[REG_COUNT]; // Buffer to store values read from the smar
 bool meterCallback(Modbus::ResultCode event, uint16_t transactionId, void* data) {
   if (event != Modbus::EX_SUCCESS) {
     LOG_ERROR("Master request error: 0x%02X", event );
-    Serial.println("Master request error: 0x%02X", event );
+    Serial.printf("Master request error: 0x%02X\n", event );
   }
   return true;
 }
@@ -42,7 +42,7 @@ bool meterCallback(Modbus::ResultCode event, uint16_t transactionId, void* data)
 bool ovumCallback(Modbus::ResultCode event, uint16_t transactionId, void* data) {
   if (event != Modbus::EX_SUCCESS) {
     LOG_ERROR("Ovum Master write error: 0x%02X", event);
-    Serial.println("Ovum Master write error: 0x%02X", event);
+    Serial.printf("Ovum Master write error: 0x%02X\n", event);
   } 
   return true;
 }
@@ -54,9 +54,9 @@ uint16_t cbOnGet50(TRegister* reg, uint16_t val) {
   } else {
     float totalPower = householdPower; // no battPower is considered in this formula
     int16_t totalPowerOvum = (int16_t)(totalPower * -100.0f);
-    LOG_DEBUG("OnGet50: total power calculation. householdPower=%.2f, battPower=%.2f, totalPower=%.2f, totalPowerOvum=%d",
+    LOG_DEBUG("OnGet50: householdPower=%.2f, battPower=%.2f, totalPower=%.2f, totalPowerOvum=%d",
                 householdPower, battPower, totalPower, totalPowerOvum);
-    Serial.printf("OnGet50: total power calculation. householdPower=%.2f, battPower=%.2f, totalPower=%.2f, totalPowerOvum=%d\n",
+    Serial.printf("OnGet50: householdPower=%.2f, battPower=%.2f, totalPower=%.2f, totalPowerOvum=%d\n",
                 householdPower, battPower, totalPower, totalPowerOvum);
     return totalPowerOvum;
   }
@@ -64,7 +64,7 @@ uint16_t cbOnGet50(TRegister* reg, uint16_t val) {
 
 uint16_t cbOnSetBattery(TRegister* reg, uint16_t val) {
   battPower = (mbTCP.Hreg(769) - mbTCP.Hreg(770)) * mbTCP.Hreg(768) / 100 /1000; // calculate battery charge(+) or discharge (-) power in kw
-  LOG_DEBUG("cbOnSetBattery callback address: %d, battPower=%.2f", reg->address.address, battPower); 
+  LOG_DEBUG("cbOnSetBattery callback address: %d, val: %d, battPower=%.2f", reg->address.address, val, battPower); 
   battUpdateTime = millis();
   return val;
 }
@@ -170,7 +170,7 @@ void loop() {
   householdPower = combineRegistersToFloat(mbTCP.Hreg(20498), mbTCP.Hreg(20499));
   int16_t totalPowerOvum = (int16_t)(householdPower * -100.0f);
 
-  Serial.printf("READ battery totalPower: %.2f, powerOvum=%d\n", householdPower, totalPowerOvum);
+  //Serial.printf("READ battery totalPower: %.2f, powerOvum=%d\n", householdPower, totalPowerOvum);
   
   // Write to mbOvum slave register 50
   mbTCP.Hreg(OVUM_REGISTER, totalPowerOvum);
