@@ -61,18 +61,19 @@ uint16_t cbOnGet50(TRegister* reg, uint16_t val) {
   int16_t return_val;
   float totalPower;
   int16_t totalPowerOvum;
+  int16_t hreg51 = mbTCP.Hreg(51);
 
-  if (mbTCP.Hreg(51) != 0) {
-    return_val = mbTCP.Hreg(51);
+  if (hreg51 != 0) {
+    return_val = hreg51;
   } else {
-    totalPower = householdPower; // no battPower is considered in this formula
+    totalPower = householdPower - battPower; // no battPower is considered in this formula
     totalPowerOvum = (int16_t)(totalPower * -100.0f);
     return_val = totalPowerOvum;
   }
-  LOG_DEBUG("OnGet50: hreg(51)=%d, householdPower=%.2f, battPower=%.2f, totalPower=%.2f, totalPowerOvum=%d",
-                mbTCP.Hreg(51), householdPower, battPower, totalPower, totalPowerOvum);
-  Serial.printf("OnGet50: hreg(51)=%d, householdPower=%.2f, battPower=%.2f, totalPower=%.2f, totalPowerOvum=%d\n",
-                mbTCP.Hreg(51), householdPower, battPower, totalPower, totalPowerOvum);
+  LOG_DEBUG("OnGet50: hreg(51)=%d, householdP=%.2f, battP=%.2f, totalP=%.2f, return=%d",
+                hreg51, householdPower, battPower, totalPower, return_val);
+  Serial.printf("OnGet50: hreg(51)=%d, householdP=%.2f, battP=%.2f, totalP=%.2f, return=%d\n",
+                hreg51, householdPower, battPower, totalPower, return_val);
   mbTCP.Hreg(50, return_val); // updated mbTCP(50) so that you can read it with TCP client
   return return_val;
 }
