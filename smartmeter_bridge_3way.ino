@@ -81,7 +81,7 @@ uint16_t cbOnGet50(TRegister* reg, uint16_t val) {
 // battery information from imeon inverter (registers 768 - 771) when read are sent from other controller
 // this is a callback when info is received
 uint16_t cbOnSetBattery(TRegister* reg, uint16_t val) {
-  battPower = (mbTCP.Hreg(769) - mbTCP.Hreg(770)) * mbTCP.Hreg(768) / 100 /1000; // calculate battery charge(+) or discharge (-) power in kw
+  battPower = ((float) mbTCP.Hreg(769) - mbTCP.Hreg(770)) * mbTCP.Hreg(768) / 100.0f /1000.0f; // calculate battery charge(+) or discharge (-) power in kw
   LOG_DEBUG("cbOnSetBattery callback address: %d, battPower=%.2f", reg->address.address, battPower); 
   battUpdateTime = millis();
   return val;
