@@ -26,4 +26,6 @@ I do some calculations to offset battery activities. And is stored in in hreg50
 
 When heatpump tries to read hreg50, logic checks if hreg51 is not zero and returns hreg50 if zero, or hreg51 if nonzero.
 
-
+# Contributions
+Relying on:
+https://github.com/emelianov/modbus-esp8266/
