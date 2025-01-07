@@ -9,6 +9,8 @@ or when heatpump is on batteries are discharging so household balance is set at 
 
 So, to get good control of what signal we want to send to heatpump, I have this bridge.
 
+Besides, I was relying on the readings of the household consumption balance from IMEON inverter, but it updates values only every 10 secs or so.
+
 # Design
 esp32-wroom controller, because it has 3 hw serials and wifi
 TTL-RS485 two converters, autoflow control
